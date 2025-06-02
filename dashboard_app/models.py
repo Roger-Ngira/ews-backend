@@ -7,6 +7,7 @@ class AfricanCity(models.Model):
     country = models.CharField(max_length=50)
     latitude = models.FloatField()
     longitude = models.FloatField()
+    population = models.BigIntegerField(null=True, blank=True, help_text="Latest population (from OWM)")
 
     def __str__(self):
         return f"{self.city}, {self.country}"

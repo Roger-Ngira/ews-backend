@@ -58,3 +58,6 @@ pip-wheel-metadata/
 
 # PyCharm 
 .idea/
+
+node_modules/
+package-lock.json
