@@ -99,19 +99,27 @@ def bulk_upsert(records):
         """)
 
 class Command(BaseCommand):
-    help = "Fetch 7-day forecasts for all AfricanCity entries, upsert into PrecipitationRecords."
+    help = "Fetch 7-day forecasts for all AfricanCity entries, then prune to keep only 3 days past and 7 days future."
 
     def handle(self, *args, **options):
         cities = list(AfricanCity.objects.all())
-        total = len(cities)
-        self.stdout.write(f"🔄 Fetching 7-day forecasts for {total} cities…")
+        self.stdout.write(f"🔄 Fetching 7-day forecasts for {len(cities)} cities…")
 
-        # Phase 1: Network calls (no DB transaction here)
         all_tuples = asyncio.run(fetch_all(cities))
         self.stdout.write(f"✅ Fetched {len(all_tuples)} day-records. Upserting…")
 
-        # Phase 2: Upsert in one short transaction
         with transaction.atomic():
+            # 1. Bulk-upsert new data
             bulk_upsert(all_tuples)
 
-        self.stdout.write("🎉 Upsert complete.")
+            # 2. Prune everything older than (today - 3) and newer than (today + 7)
+            today = date.today()
+            lower_cutoff = today - timedelta(days=3)
+            upper_cutoff = today + timedelta(days=7)
+
+            # Delete records with date < lower_cutoff
+            PrecipitationRecords.objects.filter(date__lt=lower_cutoff).delete()
+            # Delete records with date > upper_cutoff
+            PrecipitationRecords.objects.filter(date__gt=upper_cutoff).delete()
+
+        self.stdout.write("✅ Upsert + prune complete.")
