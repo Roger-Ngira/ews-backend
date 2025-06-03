@@ -7,7 +7,14 @@ class AfricanCity(models.Model):
     country = models.CharField(max_length=50)
     latitude = models.FloatField()
     longitude = models.FloatField()
-    population = models.BigIntegerField(null=True, blank=True, help_text="Latest population (from OWM)")
+    population = models.BigIntegerField(null=True, blank=True)
+
+    warning_level = models.CharField(
+        max_length=6,
+        choices=[("green", "Green"), ("orange", "Orange"), ("red", "Red")],
+        default="green",
+        help_text="Precomputed 4-day precipitation warning"
+    )
 
     def __str__(self):
         return f"{self.city}, {self.country}"

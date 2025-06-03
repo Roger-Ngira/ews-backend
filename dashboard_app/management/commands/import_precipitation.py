@@ -2,15 +2,18 @@ import asyncio
 import aiohttp
 import csv
 import io
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from collections import deque
+
 from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import connection, transaction
+
 from dashboard_app.models import AfricanCity, PrecipitationRecords
 
 OWM_URL = "https://pro.openweathermap.org/data/2.5/forecast/daily"
-MAX_CONCURRENT = 50  # keep ~50 in flight to respect 3 000/minute
-RATE_LIMIT_PAUSE = 1 / 50  # simple per‐request spacing
+MAX_CONCURRENT = 50
+RATE_LIMIT_PAUSE = 1 / 50
 
 async def fetch_one(session, city):
     lat, lon = city.latitude, city.longitude
@@ -25,12 +28,14 @@ async def fetch_one(session, city):
         async with session.get(OWM_URL, params=params, timeout=10) as resp:
             resp.raise_for_status()
             data = await resp.json()
-            result = []
+            city_info = data.get("city", {})
+            population = city_info.get("population", None)
+            tuples = []
             for day in data.get("list", []):
                 dt_date = date.fromtimestamp(day["dt"])
-                rain_mm = float(day.get("rain", 0.0))
-                result.append((city.id, dt_date, rain_mm))
-            return result
+                rain_mm = float(day.get("rain", 0.0) or 0.0)
+                tuples.append((city.id, dt_date, rain_mm))
+            return (city.id, population, tuples)
     except Exception as e:
         print(f"❌ {city.city}: {e}")
         return None
@@ -42,20 +47,20 @@ async def fetch_all(cities):
         tasks = []
         for city in cities:
             await sem.acquire()
-            task = asyncio.create_task(
-                _wrapper(sem, fetch_one, session, city)
-            )
+            task = asyncio.create_task(_wrapper(sem, fetch_one, session, city))
             tasks.append(task)
-            # simple spacing so we don’t “burst” > 50/sec
             await asyncio.sleep(RATE_LIMIT_PAUSE)
-
-        all_results = await asyncio.gather(*tasks)
-        # Flatten out None’s and nested lists
-        flat = []
-        for res in all_results:
-            if res:
-                flat.extend(res)
-        return flat
+        results = await asyncio.gather(*tasks)
+    all_records = []
+    pop_map = {}
+    for res in results:
+        if not res:
+            continue
+        city_id, population, tuples = res
+        all_records.extend(tuples)
+        if population is not None:
+            pop_map[city_id] = population
+    return all_records, pop_map
 
 async def _wrapper(sem, coro, session, city):
     try:
@@ -64,13 +69,8 @@ async def _wrapper(sem, coro, session, city):
         sem.release()
 
 def bulk_upsert(records):
-    """
-    records: list of (city_id, date, precip)
-    Uses a temp table + COPY + INSERT...ON CONFLICT.
-    """
     if not records:
         return
-
     with connection.cursor() as cursor:
         cursor.execute("""
             CREATE TEMP TABLE tmp_precip (
@@ -79,18 +79,15 @@ def bulk_upsert(records):
                 precipitation REAL
             ) ON COMMIT DROP;
         """)
-
         buffer = io.StringIO()
         writer = csv.writer(buffer)
         for city_id, dt_date, precip in records:
             writer.writerow([city_id, dt_date.isoformat(), precip])
         buffer.seek(0)
-
         cursor.copy_expert(
             "COPY tmp_precip (city_id, date, precipitation) FROM STDIN WITH CSV",
             buffer
         )
-
         cursor.execute("""
             INSERT INTO dashboard_app_precipitationrecords (city_id, date, precipitation)
             SELECT city_id, date, precipitation FROM tmp_precip
@@ -99,27 +96,40 @@ def bulk_upsert(records):
         """)
 
 class Command(BaseCommand):
-    help = "Fetch 7-day forecasts for all AfricanCity entries, then prune to keep only 3 days past and 7 days future."
+    help = "Fetch forecasts, update population, recompute warnings, prune old/future, and report completion time."
 
     def handle(self, *args, **options):
         cities = list(AfricanCity.objects.all())
-        self.stdout.write(f"🔄 Fetching 7-day forecasts for {len(cities)} cities…")
-
-        all_tuples = asyncio.run(fetch_all(cities))
-        self.stdout.write(f"✅ Fetched {len(all_tuples)} day-records. Upserting…")
-
+        self.stdout.write(f"🔄 Starting fetch for {len(cities)} cities…")
+        all_records, pop_map = asyncio.run(fetch_all(cities))
         with transaction.atomic():
-            # 1. Bulk-upsert new data
-            bulk_upsert(all_tuples)
-
-            # 2. Prune everything older than (today - 3) and newer than (today + 7)
+            bulk_upsert(all_records)
             today = date.today()
             lower_cutoff = today - timedelta(days=3)
             upper_cutoff = today + timedelta(days=7)
-
-            # Delete records with date < lower_cutoff
             PrecipitationRecords.objects.filter(date__lt=lower_cutoff).delete()
-            # Delete records with date > upper_cutoff
             PrecipitationRecords.objects.filter(date__gt=upper_cutoff).delete()
-
-        self.stdout.write("✅ Upsert + prune complete.")
+            for city_id, population in pop_map.items():
+                AfricanCity.objects.filter(id=city_id).update(population=population)
+            for city in AfricanCity.objects.all():
+                recs = PrecipitationRecords.objects.filter(city=city).order_by("date")
+                vals = [r.precipitation for r in recs if r.precipitation is not None]
+                max_sum = 0.0
+                window_sum = 0.0
+                dq = deque()
+                for v in vals:
+                    dq.append(v)
+                    window_sum += v
+                    if len(dq) > 4:
+                        window_sum -= dq.popleft()
+                    if window_sum > max_sum:
+                        max_sum = window_sum
+                new_level = "green"
+                if max_sum > 40:
+                    new_level = "red"
+                elif max_sum > 10:
+                    new_level = "orange"
+                if city.warning_level != new_level:
+                    AfricanCity.objects.filter(id=city.id).update(warning_level=new_level)
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.stdout.write(f"Update complete at {now}")
