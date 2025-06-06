@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import AfricanCityListAPIView, PrecipitationForecastAPIView
+from .views import AfricanCityListAPIView, PrecipitationForecastAPIView, WatershedListAPIView
 
 urlpatterns = [
     path('cities/', AfricanCityListAPIView.as_view(), name='city-list'),
@@ -8,4 +8,5 @@ urlpatterns = [
         PrecipitationForecastAPIView.as_view(),
         name="city-forecast",
     ),
+    path("watersheds/", WatershedListAPIView.as_view(), name="watershed-list"),
 ]

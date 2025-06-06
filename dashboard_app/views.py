@@ -3,8 +3,8 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from .models import AfricanCity, PrecipitationRecords
-from .serializers import AfricanCitySerializer, PrecipitationRecordSerializer
+from .models import AfricanCity, PrecipitationRecords, Watershed
+from .serializers import AfricanCitySerializer, PrecipitationRecordSerializer, WatershedSerializer
 
 class AfricanCityListAPIView(APIView):
     def get(self, request):
@@ -25,4 +25,20 @@ class PrecipitationForecastAPIView(APIView):
 
         records = PrecipitationRecords.objects.filter(city=city).order_by("date")
         serializer = PrecipitationRecordSerializer(records, many=True)
+        return Response(serializer.data)
+
+
+class WatershedListAPIView(APIView):
+    def get(self, request):
+        """
+        Returns a list of all BV_… watersheds, each with:
+        {
+          "id": ..,
+          "name": "..",
+          "warning_level": "..",
+          "geom": { …GeoJSON MultiPolygon… }
+        }
+        """
+        qs = Watershed.objects.all()
+        serializer = WatershedSerializer(qs, many=True)
         return Response(serializer.data)

@@ -1,6 +1,9 @@
 import json
 import os
+
 from django.core.management.base import BaseCommand
+from django.contrib.gis.geos import Point
+
 from dashboard_app.models import AfricanCity
 
 COUNTRY_NAMES = {
@@ -18,8 +21,9 @@ COUNTRY_NAMES = {
     "UG": "Uganda", "EH": "Western Sahara", "ZM": "Zambia", "ZW": "Zimbabwe"
 }
 
+
 class Command(BaseCommand):
-    help = "Import African cities from OpenWeatherMap JSON"
+    help = "Import African cities from OpenWeatherMap JSON into the GIS‐enabled model"
 
     def handle(self, *args, **options):
         african_codes = set(COUNTRY_NAMES.keys())
@@ -34,14 +38,24 @@ class Command(BaseCommand):
 
         count = 0
         for city in city_data:
-            code = city["country"]
+            code = city.get("country")
             if code in african_codes:
+                name = city.get("name")
+                lat = city["coord"]["lat"]
+                lon = city["coord"]["lon"]
+                country = COUNTRY_NAMES.get(code, "")
+
+                # Build a Point from (lon, lat).  EPSG:4326 is the default SRID for GPS coords.
+                point = Point(lon, lat, srid=4326)
+
+                # Use get_or_create so no duplicate if run multiple times
                 AfricanCity.objects.get_or_create(
-                    city=city["name"],
+                    city=name,
                     country_code=code,
-                    country=COUNTRY_NAMES.get(code, ""),
-                    latitude=city["coord"]["lat"],
-                    longitude=city["coord"]["lon"]
+                    country=country,
+                    defaults={
+                        "location": point,
+                    }
                 )
                 count += 1
 

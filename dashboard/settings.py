@@ -34,6 +34,8 @@ DEBUG = True
 
 ALLOWED_HOSTS = []
 
+GDAL_LIBRARY_PATH = r"C:\Program Files\PostgreSQL\17\bin\libgdal-35.dll"
+GEOS_LIBRARY_PATH = r"C:\Program Files\PostgreSQL\17\bin\libgeos_c.dll"
 
 # Application definition
 
@@ -47,6 +49,8 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django.contrib.gis",
+
 ]
 
 MIDDLEWARE = [
@@ -88,9 +92,9 @@ WSGI_APPLICATION = "dashboard.wsgi.application"
 
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.postgresql",
+        "ENGINE": "django.contrib.gis.db.backends.postgis",
         "NAME": "dashboard_db",
-        "USER": "postgres",           # or your Postgres user
+        "USER": "postgres",
         "PASSWORD": "password",
         "HOST": "localhost",
         "PORT": 5432,
