@@ -1,7 +1,7 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from .models import AfricanCity, PrecipitationRecords
+from .models import AfricanCity, PrecipitationRecords, Watershed
 from .serializers import AfricanCitySerializer, PrecipitationRecordSerializer, WatershedSerializer
 
 class AfricanCityListAPIView(APIView):
