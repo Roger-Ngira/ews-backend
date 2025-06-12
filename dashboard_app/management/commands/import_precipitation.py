@@ -45,7 +45,7 @@ async def fetch_one(session, city):
 
             return (city.id, population, tuples)
     except Exception as e:
-        print(f"❌ {city.city}: {e}")
+        print(f"[>>] {city.city}: {e}")
         return None
 
 async def fetch_all(cities):
@@ -109,7 +109,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         cities = list(AfricanCity.objects.all())
         start = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        self.stdout.write(f"🔄 Starting fetch for {len(cities)} cities at {start}…")
+        self.stdout.write(f"[>>] Starting fetch for {len(cities)} cities at {start}")
 
         all_records, pop_map = asyncio.run(fetch_all(cities))
 
