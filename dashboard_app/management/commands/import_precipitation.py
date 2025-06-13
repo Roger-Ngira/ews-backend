@@ -3,7 +3,7 @@ import aiohttp
 import csv
 import io
 from datetime import date, datetime, timedelta
-from collections import deque
+from collections import deque, defaultdict
 
 from django.conf import settings
 from django.core.management.base import BaseCommand
@@ -155,18 +155,49 @@ class Command(BaseCommand):
                     AfricanCity.objects.filter(id=city.id).update(warning_level=new_level)
 
             for ws in Watershed.objects.all():
-                # collect warning_level strings for all cities in this watershed
-                city_levels = list(ws.cities.values_list("warning_level", flat=True))
-                if "red" in city_levels:
-                    ws_new = "red"
-                elif "orange" in city_levels:
-                    ws_new = "orange"
-                else:
-                    ws_new = "green"
+                city_ids = list(ws.cities.values_list("id", flat=True))
+                if not city_ids:
+                    continue
 
-                if ws.warning_level != ws_new:
-                    # save the new level
-                    ws.warning_level = ws_new
+                # Get precipitation records for these cities
+                records = PrecipitationRecords.objects.filter(city_id__in=city_ids)
+
+                # Group by date: {date -> list of precip values from all cities}
+                daily_precip = defaultdict(list)
+                for r in records:
+                    if r.precipitation is not None:
+                        daily_precip[r.date].append(r.precipitation)
+
+                # Average per day: {date -> avg precipitation}
+                daily_avg = {}
+                for dt, values in daily_precip.items():
+                    if values:
+                        daily_avg[dt] = sum(values) / len(values)
+
+                # Sort by date
+                sorted_dates = sorted(daily_avg.keys())
+                values = [daily_avg[dt] for dt in sorted_dates]
+
+                max_sum = 0.0
+                window_sum = 0.0
+                dq = deque()
+
+                for v in values:
+                    dq.append(v)
+                    window_sum += v
+                    if len(dq) > 4:
+                        window_sum -= dq.popleft()
+                    if window_sum > max_sum:
+                        max_sum = window_sum
+
+                new_level = "green"
+                if max_sum > 40:
+                    new_level = "red"
+                elif max_sum > 10:
+                    new_level = "orange"
+
+                if ws.warning_level != new_level:
+                    ws.warning_level = new_level
                     ws.save(update_fields=["warning_level"])
             # ───────────────────────────────────────────────────────────────────
 
